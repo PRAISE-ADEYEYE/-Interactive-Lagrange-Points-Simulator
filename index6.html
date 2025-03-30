@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Interactive Lagrange Points Simulator</title>
+  <style>
+    /* Global Reset */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      background-color: #000;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+      color: #ddd;
+    }
+    
+    /* Canvas for Three.js Scene */
+    canvas {
+      display: block;
+    }
+    
+    /* UI Overlay */
+    #uiOverlay {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 15px;
+      border-radius: 8px;
+      z-index: 10;
+      width: 300px;
+    }
+    
+    #uiOverlay h2 {
+      font-size: 22px;
+      margin-bottom: 10px;
+    }
+    
+    #uiOverlay label {
+      display: block;
+      font-size: 16px;
+      margin-top: 10px;
+    }
+    
+    #uiOverlay input[type="range"] {
+      width: 100%;
+      margin-top: 5px;
+    }
+    
+    #uiOverlay p {
+      font-size: 16px;
+      margin-top: 10px;
+    }
+    
+    /* Extra blank lines for code extension */
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+  </style>
+</head>
+<body>
+  <div id="uiOverlay">
+    <h2>Lagrange Points Simulator</h2>
+    <label for="massRatioSlider">Mass Ratio (m2/(m1+m2))</label>
+    <input type="range" id="massRatioSlider" min="0.001" max="0.5" step="0.001" value="0.05">
+    <p>Current Mass Ratio: <span id="massRatioDisplay">0.05</span></p>
+    <p>Separation Distance: <span id="distanceDisplay">100</span> units</p>
+  </div>
+  
+  <!-- Three.js Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- OrbitControls for Camera Navigation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/controls/OrbitControls.js"></script>
+  
+  <script>
+    // =====================================================
+    // Global Constants and Variables
+    // =====================================================
+    const SEPARATION = 100; // Separation distance between the two bodies
+    let massRatio = parseFloat(document.getElementById("massRatioSlider").value);
+    // Mass ratio is defined as mu = m2/(m1+m2)
+    // For example, m1 >> m2 if mu is small
+    
+    // Update UI display for mass ratio
+    const massRatioDisplay = document.getElementById("massRatioDisplay");
+    massRatioDisplay.textContent = massRatio;
+    
+    // =====================================================
+    // Scene, Camera, Renderer Setup
+    // =====================================================
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000000);
+    
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 10000);
+    camera.position.set(0, 50, 200);
+    
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+    
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    
+    // =====================================================
+    // End Scene Setup
+    // =====================================================
+    
+    
+    // =====================================================
+    // Lights and Ambient Effects
+    // =====================================================
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+    
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(50, 100, 50);
+    scene.add(directionalLight);
+    
+    // =====================================================
+    // End Lights Setup
+    // =====================================================
+    
+    
+    // =====================================================
+    // Helper Function: Create Sphere with Label
+    // =====================================================
+    function createLabeledSphere(radius, color, labelText) {
+      const sphereGeometry = new THREE.SphereGeometry(radius, 32, 32);
+      const sphereMaterial = new THREE.MeshPhongMaterial({ color: color });
+      const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+      
+      // Create label as a sprite
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      context.font = "24px Arial";
+      const textWidth = context.measureText(labelText).width;
+      canvas.width = textWidth + 20;
+      canvas.height = 40;
+      context.font = "24px Arial";
+      context.fillStyle = "#ffffff";
+      context.fillText(labelText, 10, 30);
+      const texture = new THREE.CanvasTexture(canvas);
+      const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+      const sprite = new THREE.Sprite(spriteMaterial);
+      sprite.scale.set(30, 15, 1);
+      sphere.add(sprite);
+      sprite.position.set(0, radius + 10, 0);
+      
+      return sphere;
+    }
+    // =====================================================
+    // End Helper Function
+    // =====================================================
+    
+    
+    // =====================================================
+    // Primary Bodies: Body 1 (e.g., Star) and Body 2 (e.g., Planet)
+    // =====================================================
+    // Place the larger body (m1) at position (-mu * SEPARATION, 0, 0)
+    // Place the smaller body (m2) at position ((1-mu) * SEPARATION, 0, 0)
+    let body1, body2;
+    
+    function createPrimaryBodies() {
+      // Remove previous bodies if exist
+      if (body1) scene.remove(body1);
+      if (body2) scene.remove(body2);
+      
+      // For visualization, let m1 be larger and colored yellow, m2 blue
+      // Compute positions based on mass ratio:
+      // Let m1 = 1 - mu, m2 = mu, total = 1
+      let mu = massRatio; // mu = m2/(m1+m2)
+      
+      // Center of mass (COM) is at: (m2*distance - m1*distance) / (m1+m2) = (m2 - m1)*distance
+      // But for simplicity, we place bodies along x-axis such that separation = SEPARATION.
+      // Let body1 be at x = -mu * SEPARATION and body2 at x = (1-mu) * SEPARATION.
+      let pos1 = -mu * SEPARATION;
+      let pos2 = (1 - mu) * SEPARATION;
+      
+      body1 = createLabeledSphere(8, 0xffdd00, "Body 1");
+      body2 = createLabeledSphere(4, 0x0099ff, "Body 2");
+      
+      body1.position.set(pos1, 0, 0);
+      body2.position.set(pos2, 0, 0);
+      
+      scene.add(body1);
+      scene.add(body2);
+    }
+    
+    createPrimaryBodies();
+    // =====================================================
+    // End Primary Bodies
+    // =====================================================
+    
+    
+    // =====================================================
+    // Lagrange Points Calculation and Visualization
+    // =====================================================
+    // We'll compute approximate positions for Lagrange points L1, L2, L3 using simple formulas
+    // and set L4 and L5 geometrically.
+    let lagrangePoints = []; // Array to store spheres representing Lagrange points
+    
+    function clearLagrangePoints() {
+      lagrangePoints.forEach(pt => scene.remove(pt));
+      lagrangePoints = [];
+    }
+    
+    function updateLagrangePoints() {
+      clearLagrangePoints();
+      
+      let mu = massRatio;  // mass ratio m2/(m1+m2)
+      // Separation distance between bodies is SEPARATION.
+      // Let r1 = distance from body1 to Lagrange point along line connecting bodies.
+      // Approximate L1: position relative to body2: dL1 ≈ SEPARATION * (1 - (mu/3)^(1/3))
+      // Position L1 along the line from body1 to body2.
+      let dL1 = SEPARATION * (1 - Math.pow(mu / 3, 1/3));
+      // L1 is located between the bodies. Its x-coordinate relative to body1:
+      let L1x = body1.position.x + dL1;
+      let L1 = createLabeledSphere(2, 0xff0000, "L1");
+      L1.position.set(L1x, 0, 0);
+      lagrangePoints.push(L1);
+      scene.add(L1);
+      
+      // Approximate L2: position beyond body2: dL2 ≈ SEPARATION * (1 + (mu/3)^(1/3))
+      let dL2 = SEPARATION * (1 + Math.pow(mu / 3, 1/3));
+      let L2x = body1.position.x + dL2;
+      let L2 = createLabeledSphere(2, 0xff0000, "L2");
+      L2.position.set(L2x, 0, 0);
+      lagrangePoints.push(L2);
+      scene.add(L2);
+      
+      // Approximate L3: on the opposite side of body1
+      // A rough approximation: L3 ≈ -SEPARATION * (1 + 5*mu/12)
+      let L3x = body1.position.x - SEPARATION * (1 + 5 * mu / 12);
+      let L3 = createLabeledSphere(2, 0xff0000, "L3");
+      L3.position.set(L3x, 0, 0);
+      lagrangePoints.push(L3);
+      scene.add(L3);
+      
+      // L4 and L5: These form equilateral triangles with the two bodies.
+      // L4 is ahead of body2 by 60°; L5 is behind by 60°.
+      // Compute midpoint between body1 and body2:
+      let midX = (body1.position.x + body2.position.x) / 2;
+      let midY = 0;
+      // Distance between bodies:
+      let d = Math.abs(body2.position.x - body1.position.x);
+      // Height of equilateral triangle: h = d * sqrt(3)/2
+      let h = d * Math.sqrt(3) / 2;
+      
+      let L4 = createLabeledSphere(2, 0xff0000, "L4");
+      // L4: above the line connecting bodies
+      L4.position.set(midX, h, 0);
+      lagrangePoints.push(L4);
+      scene.add(L4);
+      
+      let L5 = createLabeledSphere(2, 0xff0000, "L5");
+      // L5: below the line connecting bodies
+      L5.position.set(midX, -h, 0);
+      lagrangePoints.push(L5);
+      scene.add(L5);
+    }
+    
+    updateLagrangePoints();
+    // =====================================================
+    // End Lagrange Points Calculation
+    // =====================================================
+    
+    
+    // =====================================================
+    // Slider Input for Mass Ratio and UI Update
+    // =====================================================
+    const massRatioSlider = document.getElementById("massRatioSlider");
+    massRatioSlider.addEventListener("input", function() {
+      massRatio = parseFloat(this.value);
+      massRatioDisplay.textContent = massRatio;
+      createPrimaryBodies();
+      updateLagrangePoints();
+    });
+    // =====================================================
+    // End Slider Input
+    // =====================================================
+    
+    
+    // =====================================================
+    // Camera and Controls Update
+    // =====================================================
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+    window.addEventListener("resize", onWindowResize, false);
+    
+    // =====================================================
+    // End Camera and Controls
+    // =====================================================
+    
+    
+    // =====================================================
+    // Animation Loop
+    // =====================================================
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+    // =====================================================
+    // End Animation Loop
+    // =====================================================
+
+    // End of Interactive Lagrange Points Simulator Code
+    // Enjoy exploring the gravitational balance points and learn about orbital mechanics!
+    
+  </script>
+
+  
+  
+</body>
+</html>
